@@ -53,16 +53,15 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,))
 ])
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-train_path = os.path.join(script_dir, 'brain_tumor_dataset', 'training')
-test_path = os.path.join(script_dir, 'brain_tumor_dataset', 'testing')
+train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
+test_path = '/kaggle/input//brain-tumor-mri-dataset/Testing'
 
 train_dataset = datasets.ImageFolder(root=train_path, transform=transform)
 test_dataset = datasets.ImageFolder(root=test_path, transform=transform)
 
 batch_size = 32
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
 classes = train_dataset.classes
 print(f"Classes: {classes}")
@@ -203,7 +202,7 @@ axes[1].legend()
 axes[1].grid(True)
 
 plt.tight_layout()
-plt.savefig('baseline_model_results.png', dpi=300, bbox_inches='tight')
+plt.savefig('/kaggle/working/baseline_model_results.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 results = {
@@ -218,7 +217,7 @@ results = {
     'epochs': len(train_accuracies)
 }
 
-with open('baseline_results.json', 'w') as f:
+with open('/kaggle/working/baseline_results.json', 'w') as f:
     json.dump(results, f, indent=4)
 
 print("\nResults saved to 'baseline_results.json'")

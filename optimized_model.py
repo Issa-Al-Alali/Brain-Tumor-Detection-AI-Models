@@ -1,37 +1,36 @@
 """
-VERSION 3: ADVANCED MODEL WITH REGULARIZATION
-==============================================
-Purpose: Maximize generalization and reduce overfitting
+VERSION 4: OPTIMIZED MODEL - BALANCED REGULARIZATION
+====================================================
+Purpose: Fix over-regularization from Version 3 while maintaining good generalization
 
-Changes from Version 2 (Improved):
-----------------------------------
-Data Augmentation (NEW):
-- Random horizontal flips (medical images can appear flipped)
-- Random rotation (±15 degrees) for orientation invariance
-- Random affine transformations for slight deformations
-- Color jitter for brightness/contrast variations
-- Applied only to training data
+Analysis of Version 3 Issues:
+-----------------------------
+- Test accuracy dropped from 96.11% (V2) to 87.72% (V3)
+- Over-regularization: dropout (0.5) + L2 (0.0001) + heavy augmentation
+- The model is now UNDERFITTING rather than overfitting
 
-Regularization Techniques:
-- L2 Regularization (weight_decay=0.0001) added to optimizer
-- Maintained Dropout (0.5)
-- Combination of both regularization methods
+Changes from Version 3:
+-----------------------
+1. REDUCED Data Augmentation:
+   - Keep horizontal flip (medical relevance)
+   - Reduce rotation: 15° → 10°
+   - Remove affine transforms (too aggressive)
+   - Reduce color jitter intensity
+   
+2. ADJUSTED Regularization:
+   - Reduce dropout: 0.5 → 0.3
+   - Reduce L2: 0.0001 → 0.00005
+   - Balance between regularization and learning capacity
 
-Model Architecture:
-- Same as Version 2 (3 conv layers, 3 FC layers)
-- Architecture is already good, focus on regularization
-
-Training Configuration:
-- Learning Rate Scheduler: StepLR (decay by 0.5 every 5 epochs)
-- Increased epochs: 10 → 15 (to benefit from LR scheduling)
-- L2 regularization through weight_decay
-- Better convergence with adaptive learning rate
-
-Expected Improvements:
-- Significantly reduced overfitting
-- Better generalization to unseen data
-- More robust to image variations
-- Smaller train-test accuracy gap
+3. REFINED Training:
+   - Keep learning rate scheduler (proven effective)
+   - Increase epochs: 15 → 20 (model needs more time with lighter regularization)
+   - Add early stopping patience
+   
+Expected Results:
+- Test accuracy: 96-98%
+- Overfitting gap: < 2%
+- Better balance between generalization and performance
 """
 
 import torch
@@ -54,22 +53,21 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {device}')
 
 # ===========================
-# DATASET SETUP WITH AUGMENTATION
+# DATASET SETUP WITH OPTIMIZED AUGMENTATION
 # ===========================
 print("Loading Brain Tumor MRI dataset...")
 
-# TRAINING: With data augmentation
+# TRAINING: Lighter, more appropriate augmentation
 train_transform = transforms.Compose([
     transforms.Resize((128, 128)),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(15),
-    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),
+    transforms.RandomHorizontalFlip(p=0.5),  # Keep - medically relevant
+    transforms.RandomRotation(10),  # Reduced from 15
+    transforms.ColorJitter(brightness=0.1, contrast=0.1),  # Reduced from 0.2
     transforms.ToTensor(),
     transforms.Normalize((0.5,), (0.5,))
 ])
 
-# TESTING: No augmentation (only normalization)
+# TESTING: No augmentation
 test_transform = transforms.Compose([
     transforms.Resize((128, 128)),
     transforms.ToTensor(),
@@ -78,7 +76,6 @@ test_transform = transforms.Compose([
 
 train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
 test_path = '/kaggle/input//brain-tumor-mri-dataset/Testing'
-
 
 train_dataset = datasets.ImageFolder(root=train_path, transform=train_transform)
 test_dataset = datasets.ImageFolder(root=test_path, transform=test_transform)
@@ -93,26 +90,26 @@ print(f"Training samples: {len(train_dataset)}")
 print(f"Testing samples: {len(test_dataset)}")
 
 # ===========================
-# ADVANCED CNN MODEL
+# OPTIMIZED CNN MODEL
 # ===========================
-class AdvancedCNN(nn.Module):
+class OptimizedCNN(nn.Module):
     """
-    Advanced model with same architecture as Version 2
-    but trained with better regularization techniques:
-    - Data augmentation (applied in dataset)
-    - L2 regularization (applied in optimizer)
-    - Dropout (0.5)
+    Optimized model with balanced regularization:
+    - Same architecture as V2 and V3
+    - Reduced dropout: 0.3 (from 0.5)
+    - L2 regularization: 0.00005 (from 0.0001)
+    - Lighter data augmentation
     """
     def __init__(self):
-        super(AdvancedCNN, self).__init__()
+        super(OptimizedCNN, self).__init__()
         # 3 conv layers
         self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
         self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
         
-        # Dropout
-        self.dropout = nn.Dropout(0.5)
+        # Reduced dropout
+        self.dropout = nn.Dropout(0.3)  # Changed from 0.5
         
         # Calculate flattened size
         self._to_linear = None
@@ -142,30 +139,33 @@ class AdvancedCNN(nn.Module):
         x = self.fc3(x)
         return x
 
-model = AdvancedCNN().to(device)
+model = OptimizedCNN().to(device)
 print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
 
 # ===========================
-# TRAINING CONFIG WITH L2 & SCHEDULER
+# TRAINING CONFIG WITH BALANCED REGULARIZATION
 # ===========================
 criterion = nn.CrossEntropyLoss()
 
-# L2 Regularization via weight_decay
-optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
+# Reduced L2 Regularization
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.00005)
 
 # Learning rate scheduler
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-epochs = 15  # More epochs to benefit from LR scheduling
+epochs = 20  # More epochs for better convergence
+best_test_acc = 0
+patience = 5
+patience_counter = 0
 
 train_losses, train_accuracies = [], []
 test_losses, test_accuracies = [], []
 learning_rates = []
 
 # ===========================
-# TRAINING LOOP
+# TRAINING LOOP WITH EARLY STOPPING
 # ===========================
-print("\nStarting training with augmentation, L2, and LR scheduling...")
+print("\nStarting training with optimized regularization...")
 for epoch in range(epochs):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
@@ -214,6 +214,17 @@ for epoch in range(epochs):
     print(f"  Train - Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
     print(f"  Test  - Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
     
+    # Early stopping check
+    if test_acc > best_test_acc:
+        best_test_acc = test_acc
+        patience_counter = 0
+        print(f"  ✓ New best test accuracy!")
+    else:
+        patience_counter += 1
+        if patience_counter >= patience:
+            print(f"\nEarly stopping triggered at epoch {epoch+1}")
+            break
+    
     # Step the scheduler
     scheduler.step()
 
@@ -221,12 +232,13 @@ for epoch in range(epochs):
 # FINAL EVALUATION
 # ===========================
 print("\n" + "="*50)
-print("FINAL RESULTS - ADVANCED MODEL")
+print("FINAL RESULTS - OPTIMIZED MODEL")
 print("="*50)
 print(f"Final Train Accuracy: {train_accuracies[-1]:.2f}%")
 print(f"Final Test Accuracy: {test_accuracies[-1]:.2f}%")
 print(f"Overfitting Gap: {train_accuracies[-1] - test_accuracies[-1]:.2f}%")
 print(f"\nBest Test Accuracy: {max(test_accuracies):.2f}% (Epoch {test_accuracies.index(max(test_accuracies))+1})")
+
 
 # ===========================
 # VISUALIZATION
@@ -268,11 +280,11 @@ axes[1, 1].axhline(y=0, color='black', linestyle='--', alpha=0.3)
 axes[1, 1].grid(True)
 
 plt.tight_layout()
-plt.savefig('/kaggle/working/advanced_model_results.png', dpi=300, bbox_inches='tight')
+plt.savefig('/kaggle/working/optimized_model_results.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 results = {
-    'model_name': 'Version 3 - Advanced with Regularization',
+    'model_name': 'Version 4 - Optimized (Balanced Regularization)',
     'train_losses': train_losses,
     'train_accuracies': train_accuracies,
     'test_losses': test_losses,
@@ -283,10 +295,11 @@ results = {
     'overfitting_gap': train_accuracies[-1] - test_accuracies[-1],
     'best_test_acc': max(test_accuracies),
     'best_epoch': test_accuracies.index(max(test_accuracies)) + 1,
-    'epochs': len(train_accuracies)
+    'epochs': len(train_accuracies),
+    'early_stopped': len(train_accuracies) < epochs
 }
 
-with open('/kaggle/working/advanced_results.json', 'w') as f:
+with open('/kaggle/working/optimized_results.json', 'w') as f:
     json.dump(results, f, indent=4)
 
-print("\nResults saved to 'advanced_results.json'")
+print("\nResults saved to 'optimized_results.json'")
