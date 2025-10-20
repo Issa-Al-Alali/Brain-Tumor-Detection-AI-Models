@@ -32,7 +32,6 @@ import warnings
 import json
 import time
 from tqdm import tqdm
-import os
 
 warnings.filterwarnings("ignore")
 
@@ -65,9 +64,8 @@ data_transforms = {
     ]),
 }
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-train_path = os.path.join(script_dir, 'brain_tumor_dataset', 'training')
-test_path = os.path.join(script_dir, 'brain_tumor_dataset', 'testing')
+train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
+test_path = '/kaggle/input//brain-tumor-mri-dataset/Testing'
 
 # Load full training data with validation transform first
 full_train_dataset = datasets.ImageFolder(root=train_path, transform=data_transforms['val'])
@@ -87,9 +85,9 @@ val_dataset = Subset(full_train_dataset, val_indices)
 test_dataset = datasets.ImageFolder(root=test_path, transform=data_transforms['val'])
 
 batch_size = 32
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0,)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0,)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
 print(f"Training samples: {len(train_dataset)}")
 print(f"Validation samples: {len(val_dataset)}")
@@ -98,22 +96,75 @@ print(f"Testing samples: {len(test_dataset)}")
 # ===========================
 # MODEL SETUP (EFFICIENTNET-B0)
 # ===========================
-# Use the recommended 'weights' API instead of 'pretrained=True'
-model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+
+# 1. Initialize the model architecture WITHOUT weights first
+model = models.efficientnet_b0(weights=None)
+
+# 2. Define the path to the local .pth file
+WEIGHTS_FILE = '/kaggle/input/efficient-b-0-weights/pytorch/default/1/efficientnet_b0_rwightman-7f5810bc.pth'
+
+print(f"Loading weights from: {WEIGHTS_FILE}")
+
+# 3. Load the state dictionary (CORRECTED VERSION)
+try:
+    # Load the checkpoint file
+    checkpoint = torch.load(WEIGHTS_FILE, map_location=device)
+    
+    # Extract the state_dict (it might be nested)
+    if isinstance(checkpoint, dict):
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        elif 'model' in checkpoint:
+            state_dict = checkpoint['model']
+        elif 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+        else:
+            # If none of the above, assume the checkpoint IS the state_dict
+            state_dict = checkpoint
+    else:
+        state_dict = checkpoint
+    
+    # Remove 'module.' prefix if it exists (from DataParallel)
+    if any(k.startswith('module.') for k in state_dict.keys()):
+        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+    
+    # Load weights with strict=False to ignore mismatched classifier layers
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    
+    print("✓ EfficientNet-B0 weights loaded successfully from local file.")
+    if missing_keys:
+        print(f"  Missing keys (expected for classifier): {len(missing_keys)} keys")
+    if unexpected_keys:
+        print(f"  Unexpected keys: {len(unexpected_keys)} keys")
+    
+except Exception as e:
+    print(f"ERROR loading weights: {e}")
+    print("\nTrying alternative: loading with weights_only=True")
+    try:
+        # For newer PyTorch versions, try weights_only parameter
+        state_dict = torch.load(WEIGHTS_FILE, map_location=device, weights_only=True)
+        model.load_state_dict(state_dict, strict=False)
+        print("✓ Weights loaded successfully with weights_only=True")
+    except:
+        print("FATAL ERROR: Could not load weights.")
+        print("Consider using PyTorch's built-in weights instead:")
+        print("  model = models.efficientnet_b0(weights='IMAGENET1K_V1')")
+        raise
 
 # Freeze all the parameters in the feature extraction layers
 for param in model.parameters():
     param.requires_grad = False
 
 # Replace the classifier
-num_ftrs = model.classifier[1].in_features
+# Get input features from the original classifier's last layer
+num_ftrs = model.classifier[1].in_features 
 model.classifier = nn.Sequential(
     nn.Dropout(p=0.3, inplace=True),
-    nn.Linear(num_ftrs, 4)
+    nn.Linear(num_ftrs, 4) # Your 4 classes
 )
 
 model = model.to(device)
-print(f"Model: EfficientNet-B0")
+print(f"Model: EfficientNet-B0 (Tuned on Melanoma/ImageNet)")
 print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 # ===========================
@@ -291,3 +342,4 @@ with open('transfer_learning_results.json', 'w') as f:
 
 print("\n✓ Results saved to 'transfer_learning_results.json'")
 print("✓ Plot saved as 'transfer_learning_results.png'")
+
