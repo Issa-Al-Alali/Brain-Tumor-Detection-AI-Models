@@ -9,6 +9,8 @@ import warnings
 import json
 import time
 from tqdm import tqdm
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
 
 warnings.filterwarnings("ignore")
 
@@ -50,7 +52,7 @@ test_path = '/kaggle/input/brain-tumor-mri-dataset/Testing'
 
 # Load and split dataset (85% train / 15% val)
 full_train_dataset = datasets.ImageFolder(root=train_path,
-                                          transform=data_transforms['val'])
+                                        transform=data_transforms['val'])
 train_size = int(0.85 * len(full_train_dataset))
 val_size = len(full_train_dataset) - train_size
 indices = list(range(len(full_train_dataset)))
@@ -59,19 +61,19 @@ np.random.shuffle(indices)
 train_indices, val_indices = indices[:train_size], indices[train_size:]
 
 train_dataset_aug = datasets.ImageFolder(root=train_path,
-                                         transform=data_transforms['train'])
+                                       transform=data_transforms['train'])
 train_dataset = Subset(train_dataset_aug, train_indices)
 val_dataset = Subset(full_train_dataset, val_indices)
 test_dataset = datasets.ImageFolder(root=test_path,
-                                    transform=data_transforms['val'])
+                                  transform=data_transforms['val'])
 
 batch_size = 64
 train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                          shuffle=True, num_workers=2, pin_memory=True)
+                        shuffle=True, num_workers=2, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                        shuffle=False, num_workers=2, pin_memory=True)
+                      shuffle=False, num_workers=2, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size,
-                         shuffle=False, num_workers=2, pin_memory=True)
+                       shuffle=False, num_workers=2, pin_memory=True)
 
 print(f"Training samples: {len(train_dataset)}")
 print(f"Validation samples: {len(val_dataset)}")
@@ -86,7 +88,7 @@ print("\nLoading pre-trained ResNet50 (ImageNet weights)...")
 model = models.resnet50(weights=None)
 
 # 2. IMPORTANT: Update this path to your local weights file
-WEIGHTS_FILE = '/kaggle/input/resnet-50-weights/pytorch/default/1/resnet50_imagenet_weights.pth'
+WEIGHTS_FILE = '/kaggle/input/resnet50-weights/pytorch/default/1/resnet50-0676ba61.pth'
 
 # 3. Load the state dictionary
 try:
@@ -299,8 +301,6 @@ test_acc = 100 * test_correct / test_total
 end_time = time.time()
 print(f"\nBest Validation Accuracy: {best_val_acc:.2f}%")
 print(f"Final Test Accuracy: {test_acc:.2f}%")
-print(f"Baseline (EfficientNet/Custom): 97.10%")
-print(f"Difference: {test_acc - 97.10:.2f}%")
 print(f"Total Training Time: {(end_time - start_time)/60:.2f} minutes")
 
 if test_acc >= 97.0:
@@ -316,7 +316,6 @@ epochs_range = range(1, len(train_accuracies) + 1)
 axes[0].plot(epochs_range, train_accuracies, label='Train Acc')
 axes[0].plot(epochs_range, val_accuracies, label='Val Acc')
 axes[0].axhline(y=test_acc, color='r', linestyle='--', label=f'Test Acc: {test_acc:.2f}%')
-axes[0].axhline(y=97.10, color='g', linestyle='--', label='Baseline: 97.10%')
 axes[0].set_title("Accuracy vs Epochs (ResNet50)")
 axes[0].legend()
 
@@ -333,7 +332,6 @@ results = {
     'model_name': 'ResNet50 Transfer Learning',
     'best_val_acc': best_val_acc,
     'final_test_acc': test_acc,
-    'baseline_acc': 97.10,
     'train_accuracies': train_accuracies,
     'val_accuracies': val_accuracies,
     'train_losses': train_losses,
@@ -343,3 +341,74 @@ with open('resnet50_transfer_learning_results.json', 'w') as f:
     json.dump(results, f, indent=4)
 print("✓ Results saved to resnet50_transfer_learning_results.json")
 print("✓ Plot saved as resnet50_transfer_learning_results.png")
+
+# Get classes from the dataset
+classes = full_train_dataset.classes
+
+y_true_list = []
+y_pred_list = []
+
+model.eval()
+with torch.no_grad():
+    for images, labels in test_loader:
+        images, labels = images.to(device), labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
+        
+        y_true_list.extend(labels.cpu().numpy())
+        y_pred_list.extend(predicted.cpu().numpy())
+
+# Generate Confusion Matrix
+cm = confusion_matrix(y_true_list, y_pred_list)
+
+# Plotting
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', 
+            xticklabels=classes, yticklabels=classes)
+plt.title('Confusion Matrix - ResNet50', fontsize=15, fontweight='bold')
+plt.ylabel('True Label', fontsize=12)
+plt.xlabel('Predicted Label', fontsize=12)
+plt.tight_layout()
+plt.show()
+
+print("\nClassification Report:\n")
+print(classification_report(y_true_list, y_pred_list, target_names=classes))
+
+# Per-class Accuracy
+print("\nPer-class Accuracy:")
+cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+for i, class_name in enumerate(classes):
+    print(f"{class_name}: {cm_normalized[i, i]*100:.2f}%")
+
+def imshow(img):
+    img = img.cpu().numpy().transpose((1, 2, 0))
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    img = std * img + mean  # Unnormalize
+    img = np.clip(img, 0, 1)
+    plt.imshow(img)
+
+# Get a batch of test images
+dataiter = iter(test_loader)
+images, labels = next(dataiter)
+images = images.to(device)
+labels = labels.to(device)
+
+# Predict
+outputs = model(images)
+_, predicted = torch.max(outputs, 1)
+
+# Plot
+fig = plt.figure(figsize=(15, 8))
+for idx in range(min(10, batch_size)): # Show up to 10 images
+    ax = fig.add_subplot(2, 5, idx+1, xticks=[], yticks=[])
+    imshow(images[idx])
+    
+    true_label = classes[labels[idx]]
+    pred_label = classes[predicted[idx]]
+    
+    color = 'green' if true_label == pred_label else 'red'
+    ax.set_title(f"True: {true_label}\nPred: {pred_label}", color=color)
+
+plt.tight_layout()
+plt.show()

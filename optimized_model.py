@@ -45,6 +45,9 @@ import numpy as np
 import warnings
 import os
 import json
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
+
 warnings.filterwarnings("ignore")
 
 # ===========================
@@ -76,7 +79,7 @@ eval_transform = transforms.Compose([
 ])
 
 train_path = '/kaggle/input/brain-tumor-mri-dataset/Training'
-test_path = '/kaggle/input//brain-tumor-mri-dataset/Testing'
+test_path = '/kaggle/input/brain-tumor-mri-dataset/Testing'
 
 # Load full training data with eval transform first
 full_train_dataset = datasets.ImageFolder(root=train_path, transform=eval_transform)
@@ -345,6 +348,7 @@ plt.tight_layout()
 plt.savefig('/kaggle/working/optimized_model_results.png', dpi=300, bbox_inches='tight')
 plt.show()
 
+# Save results JSON
 results = {
     'model_name': 'Version 4 - Optimized (Balanced Regularization)',
     'methodology': 'Proper train/val/test split - test evaluated once',
@@ -367,3 +371,69 @@ with open('/kaggle/working/optimized_results.json', 'w') as f:
 
 print("\n✓ Results saved to 'optimized_results.json'")
 print("✓ Plot saved as 'optimized_model_results.png'")
+
+# Collect all predictions and true labels from the test set
+y_true_list = []
+y_pred_list = []
+
+model.eval()
+with torch.no_grad():
+    for images, labels in test_loader:
+        images, labels = images.to(device), labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
+        
+        y_true_list.extend(labels.cpu().numpy())
+        y_pred_list.extend(predicted.cpu().numpy())
+
+# Generate Confusion Matrix
+cm = confusion_matrix(y_true_list, y_pred_list)
+
+# Plotting
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=classes, yticklabels=classes)
+plt.title('Confusion Matrix - Test Set', fontsize=15, fontweight='bold')
+plt.ylabel('True Label', fontsize=12)
+plt.xlabel('Predicted Label', fontsize=12)
+plt.tight_layout()
+plt.show()
+
+print("\nClassification Report:\n")
+print(classification_report(y_true_list, y_pred_list, target_names=classes))
+
+# Per-class Accuracy
+print("\nPer-class Accuracy:")
+cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+for i, class_name in enumerate(classes):
+    print(f"{class_name}: {cm_normalized[i, i]*100:.2f}%")
+
+def imshow(img):
+    img = img / 2 + 0.5     # unnormalize
+    npimg = img.numpy()
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+
+# Get a batch of test images
+dataiter = iter(test_loader)
+images, labels = next(dataiter)
+images = images.to(device)
+labels = labels.to(device)
+
+# Predict
+outputs = model(images)
+_, predicted = torch.max(outputs, 1)
+
+# Plot
+fig = plt.figure(figsize=(15, 8))
+for idx in range(min(10, batch_size)): # Show up to 10 images
+    ax = fig.add_subplot(2, 5, idx+1, xticks=[], yticks=[])
+    imshow(images[idx].cpu())
+    
+    true_label = classes[labels[idx]]
+    pred_label = classes[predicted[idx]]
+    
+    color = 'green' if true_label == pred_label else 'red'
+    ax.set_title(f"True: {true_label}\nPred: {pred_label}", color=color)
+
+plt.tight_layout()
+plt.show()
